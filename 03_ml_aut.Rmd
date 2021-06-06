@@ -70,21 +70,45 @@ d) It’s difficult to deduce anything based on the visualization
 Q3. What can you deduce about the interaction between Stock Option Level and Attrition?
 b) Those that are staying have a higher stock option level
 
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("satisfaction"), contains("life")) %>%
+  plot_ggpairs(Attrition)
+```  
 Q4. What can you deduce about the interaction between Environment Satisfaction and Attrition? 
 c)It’s difficult to deduce anything based on the visualization
 
 Q5. What can you deduce about the interaction between Work Life Balance and Attrition 
 b) Those that are staying have a higher density of 2’s and 3’s
 
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("performance"), contains("involvement")) %>%
+  plot_ggpairs(Attrition)
+```
 Q6. What Can you deduce about the interaction between Job Involvement and Attrition? 
 d) It’s difficult to deduce anything based on the visualization
 
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("overtime"), contains("travel")) %>%
+  plot_ggpairs(Attrition)
+
+```
 Q7. What can you deduce about the interaction between Over Time and Attrition?
 b) The proportion of those staying that are working Over Time are high compared to those that are not staying
-
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("training"), contains("education")) %>%
+  plot_ggpairs(Attrition)
+```
 Q8. What can you deduce about the interaction between Training Times Last Year and Attrition? 
 b) People that leave tend to have less annual trainings
-
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("years")) %>%
+  plot_ggpairs(Attrition)
+```  
 Q9. What can you deduce about the interaction between Years At Company and Attrition?
 b) People that leave tend to have less working years at the company
 
