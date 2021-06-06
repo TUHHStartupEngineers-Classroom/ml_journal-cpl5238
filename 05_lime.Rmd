@@ -19,24 +19,22 @@ knitr::opts_chunk$set(message=FALSE,warning=FALSE, cache=TRUE)
 
 ```{r}
 # LIME FEATURE EXPLANATION ----
-
 # 1. Setup ----
-
 # Load Libraries 
-
 library(h2o)
 library(recipes)
 library(readxl)
 library(tidyverse)
+library(xts)
 library(tidyquant)
 library(lime)
 library(rsample)
-
 # Load Data
 employee_attrition_tbl <- read_csv("HR-Employee-Attrition.csv")
 definitions_raw_tbl    <- read_excel("data_definitions.xlsx", sheet = 1, col_names = FALSE)
 
 # Processing Pipeline
+
 process_hr_data_readable <- function(data, definitions_tbl) {
   
   definitions_list <- definitions_tbl %>%
@@ -67,20 +65,13 @@ process_hr_data_readable <- function(data, definitions_tbl) {
       BusinessTravel = BusinessTravel %>% fct_relevel("Non-Travel", 
                                                       "Travel_Rarely", 
                                                       "Travel_Frequently"),
-      MaritalStatus  = MaritalStatus %>% fct_relevel("Single", 
-                                                     "Married", 
+      MaritalStatus  = MaritalStatus %>% fct_relevel("Single",                                                                                                 "Married", 
                                                      "Divorced")
     )
   
   return(data_merged_tbl)
   
 }
-process_hr_data_readable(employee_attrition_tbl, definitions_raw_tbl) %>% 
-  glimpse()
-
-employee_attrition_readable_tbl <- process_hr_data_readable(employee_attrition_tbl, definitions_raw_tbl)
-
-
 
 # Split into test and train
 set.seed(seed = 1113)
@@ -96,53 +87,43 @@ recipe_obj <- recipe(Attrition ~ ., data = train_readable_tbl) %>%
   step_mutate_at(c("JobLevel", "StockOptionLevel"), fn = as.factor) %>% 
   prep()
 
-recipe_obj
-
 train_tbl <- bake(recipe_obj, new_data = train_readable_tbl)
 test_tbl  <- bake(recipe_obj, new_data = test_readable_tbl)
+
 
 # 2. Models ----
 
 h2o.init()
 
-automl_leader <- h2o.loadModel("h20_models/StackedEnsemble_AllModels_AutoML_20210606_113757")
-automl_leader
-
-   
-    
-
-predictions_tbl <- automl_leader %>% 
-  h2o.predict(newdata = as.h2o(test_tbl)) %>%
-  as_tibble() %>%
-  bind_cols(
-    test_tbl %>%
-      select(Attrition, EmployeeNumber)
-  )
-
-predictions_tbl
+split_h2o <- h2o.splitFrame(as.h2o(train_tbl), ratios = c(0.85), seed = 1234)
 
 
-test_tbl %>%
-  slice(1) %>%
-  glimpse()
+train_h2o <- split_h2o[[1]]
+valid_h2o <- split_h2o[[2]]
+test_h2o  <- as.h2o(test_tbl)
 
+# Set the target and predictors
+y <- "Attrition"
+x <- setdiff(names(train_h2o), y)
+
+automl_models_h2o <- h2o.automl(
+  x = x,
+  y = y,
+  training_frame    = train_h2o,
+  validation_frame  = valid_h2o,
+  leaderboard_frame = test_h2o,
+  max_runtime_secs  = 30,
+  nfolds            = 5 
+)
 
 explainer <- train_tbl %>%
   select(-Attrition) %>%
   lime(
-    model           = automl_leader,
+    model           = automl_models_h2o@leader,
     bin_continuous  = TRUE,
     n_bins          = 4,
     quantile_bins   = TRUE
   )
-
-explainer
-
-
-
-
-?lime::explain
-
 explanation <- test_tbl %>%
   slice(1) %>%
   select(-Attrition) %>%
@@ -160,24 +141,62 @@ explanation <- test_tbl %>%
     kernel_width   = 1
   )
 
-explanation
 
+library(tools)
+theme_lime <- function(...) {
+  theme_minimal() +
+    theme(
+      strip.text = element_text(face = 'bold', size = 9),
+      plot.margin = margin(15, 15, 15, 15),
+      legend.background = element_blank(),
+      legend.key = element_blank(),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor.y = element_blank(),
+      axis.ticks = element_blank(),
+      legend.position = 'bottom',
+      panel.spacing.y = unit(15, 'pt'),
+      strip.text.x = element_text(margin = margin(t = 2, b = 2), hjust = 0),
+      axis.title.y = element_text(margin = margin(r = 10)),
+      axis.title.x = element_text(margin = margin(t = 10)),
+      ...
+    )
+}
 
-explanation %>%
-  as.tibble() %>%
-  select(feature:prediction) 
+label_both_upper <- function(labels, multi_line = TRUE, sep = ': ') {
+  names(labels) <- toTitleCase(names(labels))
+  label_both(labels, multi_line, sep)
+}
 
-g <- plot_features(explanation = explanation, ncol = 1)
+# Recreate plot_features()
+plot_features_in_explanation <- function(explanation, ncol = 2, cases = NULL) {
+  type_pal <- c('Supports', 'Contradicts')
+  
+  explanation$type <- factor(ifelse(sign(explanation$feature_weight) == 1, type_pal[1], type_pal[2]), levels = type_pal)
+  description <- paste0(explanation$case, '_', explanation[['label']])
+  desc_width <- max(nchar(description)) + 1
+  description <- paste0(format(description, width = desc_width), explanation$feature_desc)
+  explanation$description <- factor(description, levels = description[order(abs(explanation$feature_weight))])
+  explanation$case <- factor(explanation$case, unique(explanation$case))
+  explanation$`Explanation fit` <- format(explanation$model_r2, digits = 2)
+  
+  
+  explanation$probability <- format(explanation$label_prob, digits = 2)
+  explanation$label <- factor(explanation$label, unique(explanation$label[order(explanation$label_prob, decreasing = TRUE)]))
+  p <- ggplot(explanation) +
+    facet_wrap(~ case + label + probability + `Explanation fit`, labeller = label_both_upper, scales = 'free_y', ncol = ncol)
+  
+  p +
+    geom_col(aes_(~description, ~feature_weight, fill = ~type)) +
+    coord_flip() +
+    scale_x_discrete(labels = function(lab) substr(lab, desc_width + 1, nchar(lab))) +
+    labs(y = 'Weight', x = 'Feature', fill = '') +
+    theme_lime()
+}
 
+h <- plot_features_in_explanation(explanation = explanation)
+h
 
-
-
-
-################ plot for multiple cases
-
-
-
-explanation <- test_tbl %>%
+explanation2 <- test_tbl %>%
   slice(1:20) %>%
   select(-Attrition) %>%
   lime::explain(
@@ -188,72 +207,30 @@ explanation <- test_tbl %>%
     kernel_width   = 0.5
   )
 
-explanation %>%
-  as.tibble()
-
-plot_features(explanation, ncol = 4)
-
-########better plot
-
-plot_explanations(explanation)
-
-
-
-
-
-
-
-
-
-
-
-
-
-################### Case 1 ########################
-
-
-
-
-
+# Recreate plot_explanations()
+plot_explanations_data2 <- function(explanation2, ...) {
+  num_cases <- unique(suppressWarnings(as.numeric(explanation2$case)))
+  explanation2$case <- factor(explanation2$case, levels = as.character(sort(num_cases)))
   
+  explanation2$feature_desc <- factor(
+    explanation2$feature_desc,
+    levels = rev(unique(explanation2$feature_desc[order(explanation2$feature, explanation2$feature_value)]))
+  )
+  p <- ggplot(explanation2, aes_(~case, ~feature_desc)) +
+    geom_tile(aes_(fill = ~feature_weight)) +
+    scale_x_discrete('Case', expand = c(0, 0)) +
+    scale_y_discrete('Feature', expand = c(0, 0)) +
+    scale_fill_gradient2('Feature\nweight', low = 'firebrick', mid = '#f7f7f7', high = 'steelblue') +
+    theme_lime() +
+    theme(panel.border = element_rect(fill = NA, colour = 'grey60', size = 1),
+          panel.grid = element_blank(),
+          legend.position = 'right',
+          axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+  p + facet_wrap(~label, ...)
   
-  
-  ggplot(data=case_1, aes(x= reorder(feature_desc, abs(feature_weight)), y=feature_weight, fill = ifelse(feature_weight<0, 'blue', 'red'))) +
-    geom_col()  + 
-    labs(
-      title = "Case:1",
-      subtitle = "Label:No",
-      x="Features",
-      y="Weight",
-      fill =""
-    ) + 
-    scale_fill_hue(labels = c("contradicts", "supports")) + coord_flip()
-  
-  
-  
-  
-  
-  
-  ################2nd part
-  
-  
-  
-  
-  
-  # heat map
-  level_case <- factor(explanation$case, level = c('1':'20'))
-  
- ggplot(explanation, aes(x=level_case, y=feature_desc, fill= feature_weight)) + 
-    #scale_x_discrete(drop = FALSE) + 
-    labs(
-      x="Case",
-      y="Feature",
-      fill ="Feature weight"
-    ) + 
-    geom_tile()  + 
-    facet_wrap(~ label)
-  
+}
 
-  
+plot_explanations_data2(explanation2)
 ```
+
 
