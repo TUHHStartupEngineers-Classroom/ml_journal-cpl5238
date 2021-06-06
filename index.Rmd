@@ -1,5 +1,5 @@
 ---
-title: "MyLabJournal"
+title: "cpl5238 Lab Journal"
 output: html_document
 ---
 
@@ -7,16 +7,12 @@ output: html_document
 
 ![](images/logo.png)
 
-# **My Lab Journal**
+# **cpl5238 Lab Journal**
 
-This is a template example for lab journaling. Students in the data science courses at the Institute of Entrepreneurship will use this template to learn R for business analytics. Students can replace this text as they wish.
+The website covers the tasks of Machine learning that are provided by Startup Engineer.io Tuhh.
 
-## How to use
+## Objectives
 
-1. Accept the assignment and get your own github repo.
+1.To learn basics of Machine learning.
 
-2. Blog/journal what you are doing in R, by editing the `.Rmd` files. 
-
-3. See the links page for lots of helpful links on learning R.
-
-4. Change everything to make it your own.
+2.Understading the real world applications of machine learning.
