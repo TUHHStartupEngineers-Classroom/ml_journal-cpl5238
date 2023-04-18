@@ -1,6 +1,6 @@
 ---
 title: "03 Automated Machine Learning with H20"
-date: "2020-11-05"
+date: "2021-06-05"
 output:
   html_document:
     toc: true
@@ -16,39 +16,172 @@ output:
 knitr::opts_chunk$set(message=FALSE,warning=FALSE, cache=TRUE)
 ```
 
-**IMPORTANT:** You can delete everything in here and start fresh. You might want to start by not deleting anything above this line until you know what that stuff is doing.
+```{r}
+library(tidyverse)
+library(readxl)
+library(skimr)
+library(GGally)
 
-This is an `.Rmd` file. It is plain text with special features. Any time you write just like this, it will be compiled to normal text in the website. If you put a \# in front of your text, it will create a top level-header.
+# Load Data data definitions
+employee_attrition_tbl <- read_csv("HR-Employee-Attrition.csv")
 
-# My first post
+# Create data tibble, to potentially debug the plot_ggpairs function (because it has a data argument)
+data <- employee_attrition_tbl %>%
+  select(Attrition, Age, Gender, MaritalStatus, NumCompaniesWorked, Over18, DistanceFromHome)
 
-Last compiled: `r Sys.Date()`
+plot_ggpairs <- function(data, color = NULL, density_alpha = 0.5) {
+  
+  color_expr <- enquo(color)
+  
+  if (rlang::quo_is_null(color_expr)) {
+    
+    g <- data %>%
+      ggpairs(lower = "blank") 
+    
+  } else {
+    
+    color_name <- quo_name(color_expr)
+    
+    g <- data %>%
+      ggpairs(mapping = aes_string(color = color_name), 
+              lower = "blank", legend = 1,
+              diag = list(continuous = wrap("densityDiag", 
+                                            alpha = density_alpha))) +
+      theme(legend.position = "bottom")
+  }
+  
+  return(g)
+}
 
-Notice that whatever you define as a top level header, automatically gets put into the table of contents bar on the left. 
 
-## Second level header
+employee_attrition_tbl %>%
+  select(Attrition, contains("income"), contains("rate"), contains("salary"), contains("stock")) %>%
+  plot_ggpairs(Attrition)
 
-You can add more headers by adding more hashtags. These won't be put into the table of contents
+```
+####Answers from plottings
 
-### third level header
+Q1. What can you deduce about the interaction between Monthly Income and Attrition?
+c) Those that are leaving have a lower Monthly Income
 
-Here's an even lower level header
+Q2. What can you deduce about the interaction between Percent Salary Hike and Attrition? 
+d) It’s difficult to deduce anything based on the visualization
 
-# My second post (note the order)
-
-Last compiled: `r Sys.Date()`
-
-I'm writing this tutorial going from the top down. And, this is how it will be printed. So, notice the second post is second in the list. If you want your most recent post to be at the top, then make a new post starting at the top. If you want the oldest first, do, then keep adding to the bottom
-
-# Adding R stuff
-
-So far this is just a blog where you can write in plain text and serve your writing to a webpage. One of the main purposes of this lab journal is to record your progress learning R. The reason I am asking you to use this process is because you can both make a website, and a lab journal, and learn R all in R-studio. This makes everything really convenient and in the same place. 
-
-So, let's say you are learning how to make a histogram in R. For example, maybe you want to sample 100 numbers from a normal distribution with mean = 0, and standard deviation = 1, and then you want to plot a histogram. You can do this right here by using an r code block, like this:
+Q3. What can you deduce about the interaction between Stock Option Level and Attrition?
+b) Those that are staying have a higher stock option level
 
 ```{r}
-samples <- rnorm(100, mean=0, sd=1)
-hist(samples)
+employee_attrition_tbl %>%
+  select(Attrition, contains("satisfaction"), contains("life")) %>%
+  plot_ggpairs(Attrition)
+```  
+Q4. What can you deduce about the interaction between Environment Satisfaction and Attrition? 
+c)It’s difficult to deduce anything based on the visualization
+
+Q5. What can you deduce about the interaction between Work Life Balance and Attrition 
+b) Those that are staying have a higher density of 2’s and 3’s
+
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("performance"), contains("involvement")) %>%
+  plot_ggpairs(Attrition)
+```
+Q6. What Can you deduce about the interaction between Job Involvement and Attrition? 
+d) It’s difficult to deduce anything based on the visualization
+
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("overtime"), contains("travel")) %>%
+  plot_ggpairs(Attrition)
+
+```
+Q7. What can you deduce about the interaction between Over Time and Attrition?
+b) The proportion of those staying that are working Over Time are high compared to those that are not staying
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("training"), contains("education")) %>%
+  plot_ggpairs(Attrition)
+```
+Q8. What can you deduce about the interaction between Training Times Last Year and Attrition? 
+b) People that leave tend to have less annual trainings
+```{r}
+employee_attrition_tbl %>%
+  select(Attrition, contains("years")) %>%
+  plot_ggpairs(Attrition)
+```  
+Q9. What can you deduce about the interaction between Years At Company and Attrition?
+b) People that leave tend to have less working years at the company
+
+Q10. What can you deduce about the interaction between Years Since Last Promotion and Attrition? 
+b) Those that are leaving have fewer years since last promotion than those that are staying
+
+
+```{r}
+library(h2o)
+library(tidyverse)
+library(readxl)
+library(rsample)
+library(recipes)
+
+# Load the training & test dataset
+products_backorders_tbl <- read_csv("product_backorders.csv")
+
+products_backorders_tbl <- products_backorders_tbl  %>%
+  mutate_if(is.character, as.factor)
+
+set.seed(seed = 1113)
+
+split_obj                       <- rsample::initial_split(products_backorders_tbl, prop = 0.85)
+train_readable_tbl              <- training(split_obj)
+test_readable_tbl               <- testing(split_obj)
+
+# Specifiy the response and predictor variables
+recipe_obj <- recipe(went_on_backorder ~., data = train_readable_tbl) %>% 
+  step_zv(all_predictors()) %>% 
+  prep()
+
+train_tbl <- bake(recipe_obj, new_data = train_readable_tbl)
+test_tbl  <- bake(recipe_obj, new_data = test_readable_tbl)
+
+# Modeling
+h2o.init()
+# Split data into a training and a validation data frame
+# Setting the seed is just for reproducability
+split_h2o <- h2o.splitFrame(as.h2o(train_tbl), ratios = c(0.85), seed = 1234)
+train_h2o <- split_h2o[[1]]
+valid_h2o <- split_h2o[[2]]
+test_h2o  <- as.h2o(test_tbl)
+# run AutoML specifying the stopping criterion
+# Set the target and predictors
+y <- "went_on_backorder"
+x <- setdiff(names(train_h2o), y)
+
+automl_models_h2o <- h2o.automl(
+  x = x,
+  y = y,
+  training_frame    = train_h2o,
+  validation_frame  = valid_h2o,
+  leaderboard_frame = test_h2o,
+  max_runtime_secs  = 30,
+  nfolds            = 5 
+)
+
+# View the leaderboard
+automl_models_h2o@leaderboard
+
+automl_models_h2o@leader
+
+# Predicting using Leader Model
+predictions <- h2o.predict(automl_models_h2o@leader, newdata = as.h2o(test_tbl))
+
+predictions_tbl <- predictions %>% as_tibble()
+
+predictions_tbl
+
+# Save the leader model
+automl_models_h2o@leader %>% h2o.saveModel(path = "h20_models/")
+
+
+
 ```
 
-When you knit this R Markdown document, you will see that the histogram is printed to the page, along with the R code. This document can be set up to hide the R code in the webpage, just delete the comment (hashtag) from the cold folding option in the yaml header up top. For purposes of letting yourself see the code, and me see the code, best to keep it the way that it is. You'll learn that all of these things and more can be customized in each R code block.
